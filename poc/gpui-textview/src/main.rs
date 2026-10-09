@@ -1123,6 +1123,11 @@ fn bind_keys(cx: &mut App) {
 fn main() {
     START.get_or_init(Instant::now);
     memstat::start_from_env();
+    // RUST_LOG=info (or ZED_LOG) prints GPUI's logs to stderr.
+    if std::env::var_os("RUST_LOG").is_some() || std::env::var_os("ZED_LOG").is_some() {
+        zlog::init();
+        zlog::init_output_stderr();
+    }
     application().run(|cx: &mut App| {
         gpui_component::init(cx);
         if std::env::var("POC_TEXT_MODE").as_deref() == Ok("grayscale") {

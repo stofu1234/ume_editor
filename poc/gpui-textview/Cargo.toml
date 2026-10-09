@@ -10,9 +10,11 @@ publish = false
 
 [dependencies]
 gpui = { package = "gpui-pre", version = "=0.3.8" }
-gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8" }
+# Without these features GPUI runs headless on Linux.
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features = ["wayland", "x11"] }
 gpui-component = "=0.7.1"
 gpui-base = "=0.7.1"
+zlog = { package = "gpui-pre-zlog", version = "=0.3.8" }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_Memory", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
