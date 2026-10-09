@@ -36,7 +36,7 @@
 
 - [x] 決定事項の記録（docs/adr/）
 - [x] ライセンス、README、CLAUDE.md
-- [ ] GitHub リポジトリを作る
+- [x] GitHub リポジトリを作る（https://github.com/stofu1234/ume_editor 、公開）
 - [ ] Onigmo を fork する（ユーザー）
-- [ ] Mac で UI を試作し、ADR-0004 を確定する（[試作の手順](poc/ui-framework.md)）
-- [ ] Cargo ワークスペースと CI（macOS / Windows / Linux）
+- [ ] UI を試作し、ADR-0004 を確定する（まず Windows ARM64 で行う。[ADR-0009](adr/0009-initial-development-target.md)、[試作の手順](poc/ui-framework.md)）
+- [ ] Cargo ワークスペースと CI（Windows x64・ARM64 / macOS / Linux x64・ARM64）
