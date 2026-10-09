@@ -22,6 +22,7 @@ cargo test --workspace --locked
 
 - CI（`.github/workflows/ci.yml`）は Windows x64・ARM64、macOS ARM64、Linux x64・ARM64 で回す
 - クレートは `crates/` に置く。`ume-core` は UI に依存しないコア
+- `poc/` は捨てる前提の試作で、ワークスペースにも CI にも入れていない。試作のビルドとテストは、その試作のディレクトリで行う（例: [poc/gpui](poc/gpui/README.md)）
 
 ## 設計のルール
 
