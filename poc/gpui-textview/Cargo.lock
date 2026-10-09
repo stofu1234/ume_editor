@@ -2713,9 +2713,11 @@ checksum = "d337c9acf058238e45ce0570d8a5958439242889492f91ae2d8e324211a61ccd"
 name = "gpui-textview-poc"
 version = "0.0.0"
 dependencies = [
+ "gpui-base",
  "gpui-component",
  "gpui-pre",
  "gpui-pre-platform",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

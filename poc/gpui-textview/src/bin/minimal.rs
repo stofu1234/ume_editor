@@ -6,6 +6,12 @@ use gpui::{
 };
 use gpui_platform::application;
 
+#[path = "../memstat.rs"]
+mod memstat;
+
+#[global_allocator]
+static ALLOC: memstat::CountingAlloc = memstat::CountingAlloc;
+
 struct Hello;
 
 impl Render for Hello {
@@ -24,7 +30,11 @@ impl Render for Hello {
 }
 
 fn main() {
+    memstat::start_from_env();
     application().run(|cx: &mut App| {
+        if std::env::var("POC_TEXT_MODE").as_deref() == Ok("grayscale") {
+            cx.set_text_rendering_mode(gpui::TextRenderingMode::Grayscale);
+        }
         if std::env::var_os("POC_INIT_COMPONENT").is_some() {
             gpui_component::init(cx);
         }

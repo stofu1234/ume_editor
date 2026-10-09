@@ -19,8 +19,12 @@ use gpui::{
 use gpui_component::Root;
 use gpui_platform::application;
 
+mod memstat;
 mod menu_bar;
 use menu_bar::MenuBar;
+
+#[global_allocator]
+static ALLOC: memstat::CountingAlloc = memstat::CountingAlloc;
 
 static START: OnceLock<Instant> = OnceLock::new();
 
@@ -1118,8 +1122,12 @@ fn bind_keys(cx: &mut App) {
 
 fn main() {
     START.get_or_init(Instant::now);
+    memstat::start_from_env();
     application().run(|cx: &mut App| {
         gpui_component::init(cx);
+        if std::env::var("POC_TEXT_MODE").as_deref() == Ok("grayscale") {
+            cx.set_text_rendering_mode(gpui::TextRenderingMode::Grayscale);
+        }
         menu_bar::init(cx);
         if let Ok(font) = std::env::var("POC_UI_FONT") {
             let theme = gpui_component::Theme::global_mut(cx);

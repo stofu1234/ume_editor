@@ -1,0 +1,133 @@
+Patch for gpui-pre-windows 0.3.8 (src/directx_atlas.rs), which is derived from
+GPUI (https://github.com/zed-industries/zed, crates/gpui_windows) and licensed
+under the Apache License 2.0. Modified for the ume_editor PoC: glyph tiles are
+uploaded through a staging texture and CopySubresourceRegion instead of
+UpdateSubresource, to avoid the per-upload memory growth seen with the
+Qualcomm Adreno X1-85 driver. See docs/poc/ui-framework-result.md.
+
+Apply inside a copy of the crate with `patch -p1 < gpui-pre-windows-atlas-upload.diff`.
+
+--- a/src/directx_atlas.rs	2026-10-09 17:30:45.809908757 +0900
++++ b/src/directx_atlas.rs	2026-10-09 17:30:45.827237582 +0900
+@@ -2,7 +2,8 @@
+ use parking_lot::Mutex;
+ use windows::Win32::Graphics::{
+     Direct3D11::{
+-        D3D11_BIND_SHADER_RESOURCE, D3D11_BOX, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
++        D3D11_BIND_SHADER_RESOURCE, D3D11_CPU_ACCESS_WRITE, D3D11_MAP_WRITE,
++        D3D11_MAPPED_SUBRESOURCE, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING,
+         ID3D11Device, ID3D11DeviceContext, ID3D11ShaderResourceView, ID3D11Texture2D,
+     },
+     Dxgi::Common::*,
+@@ -101,7 +102,7 @@
+         let texture = self
+             .texture(tile.texture_id)
+             .ok_or_else(|| anyhow::anyhow!("allocated tile refers to a missing texture"))?;
+-        texture.upload(&self.device_context, tile.bounds, bytes);
++        texture.upload(&self.device, &self.device_context, tile.bounds, bytes);
+         Ok(tile)
+     }
+ 
+@@ -278,21 +279,18 @@
+ 
+     fn upload(
+         &self,
++        device: &ID3D11Device,
+         device_context: &ID3D11DeviceContext,
+         bounds: Bounds<DevicePixels>,
+         bytes: &[u8],
+     ) {
+-        // `UpdateSubresource` reads `row_pitch * height` bytes from `bytes` based on the
+-        // `D3D11_BOX` below. If the caller hands us a slice shorter than that, the driver would
+-        // over-read past the end of the source buffer (potentially by multiple megabytes), so bail
+-        // out instead. This is a first-insert path rather than a per-frame one, so the check is
+-        // effectively free.
+         let row_bytes = bounds.size.width.to_bytes(self.bytes_per_pixel as u8) as usize;
+-        let expected = row_bytes * bounds.size.height.0.max(0) as usize;
++        let height = bounds.size.height.0.max(0) as usize;
++        let expected = row_bytes * height;
+         if bytes.len() < expected {
+             log::error!(
+                 "DirectXAtlasTexture::upload: source slice is {} bytes but the {}x{} region \
+-                 requires {} bytes; skipping upload to avoid a driver over-read",
++                 requires {} bytes; skipping upload",
+                 bytes.len(),
+                 bounds.size.width.0,
+                 bounds.size.height.0,
+@@ -300,21 +298,65 @@
+             );
+             return;
+         }
++        // Copy through a small staging texture instead of calling `UpdateSubresource`
++        // on the atlas. Some drivers (seen on Qualcomm Adreno X1-85, 31.0.160.0) make a
++        // full copy of the destination texture for every `UpdateSubresource` call on a
++        // texture that is in use, and keep those copies: about 4 MB per glyph for a
++        // 1024x1024 RGBA atlas, up to roughly 250 MB per process.
++        let mut desc = D3D11_TEXTURE2D_DESC::default();
++        unsafe { self.texture.GetDesc(&mut desc) };
++        let staging_desc = D3D11_TEXTURE2D_DESC {
++            Width: bounds.size.width.0 as u32,
++            Height: height as u32,
++            MipLevels: 1,
++            ArraySize: 1,
++            Format: desc.Format,
++            SampleDesc: DXGI_SAMPLE_DESC {
++                Count: 1,
++                Quality: 0,
++            },
++            Usage: D3D11_USAGE_STAGING,
++            BindFlags: 0,
++            CPUAccessFlags: D3D11_CPU_ACCESS_WRITE.0 as u32,
++            MiscFlags: 0,
++        };
++        let mut staging = None;
++        if let Err(error) =
++            unsafe { device.CreateTexture2D(&staging_desc, None, Some(&mut staging)) }
++        {
++            log::error!("DirectXAtlasTexture::upload: failed to create staging texture: {error}");
++            return;
++        }
++        let Some(staging) = staging else {
++            return;
++        };
++        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
++        if let Err(error) =
++            unsafe { device_context.Map(&staging, 0, D3D11_MAP_WRITE, 0, Some(&mut mapped)) }
++        {
++            log::error!("DirectXAtlasTexture::upload: failed to map staging texture: {error}");
++            return;
++        }
++        for row in 0..height {
++            unsafe {
++                std::ptr::copy_nonoverlapping(
++                    bytes.as_ptr().add(row * row_bytes),
++                    mapped.pData.cast::<u8>().add(row * mapped.RowPitch as usize),
++                    row_bytes,
++                );
++            }
++        }
+         unsafe {
+-            device_context.UpdateSubresource(
++            device_context.Unmap(&staging, 0);
++            device_context.CopySubresourceRegion(
+                 &self.texture,
+                 0,
+-                Some(&D3D11_BOX {
+-                    left: bounds.left().0 as u32,
+-                    top: bounds.top().0 as u32,
+-                    front: 0,
+-                    right: bounds.right().0 as u32,
+-                    bottom: bounds.bottom().0 as u32,
+-                    back: 1,
+-                }),
+-                bytes.as_ptr() as _,
+-                bounds.size.width.to_bytes(self.bytes_per_pixel as u8),
++                bounds.left().0 as u32,
++                bounds.top().0 as u32,
++                0,
++                &staging,
+                 0,
++                None,
+             );
+         }
+     }
