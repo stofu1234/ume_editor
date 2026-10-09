@@ -1,0 +1,15 @@
+[package]
+name = "gpui-textview-poc"
+version = "0.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# Throwaway PoC for ADR-0004; kept out of the main workspace.
+[workspace]
+
+[dependencies]
+gpui = { package = "gpui-pre", version = "=0.3.8" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8" }
+gpui-component = "=0.7.1"
+gpui-base = "=0.7.1"
