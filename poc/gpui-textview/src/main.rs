@@ -11,13 +11,16 @@ use std::time::Instant;
 use gpui::{
     App, Bounds, ClipboardItem, Context, CursorStyle, Element, ElementId, ElementInputHandler,
     Entity, EntityInputHandler, ExternalPaths, FocusHandle, Focusable, GlobalElementId, KeyBinding,
-    LayoutId, Menu, MenuItem, MouseButton, MouseDownEvent, PathPromptOptions, Pixels, Point,
-    ScrollWheelEvent, ShapedLine, SharedString, Style, TextRun, UTF16Selection, UnderlineStyle,
-    Window, WindowBounds, WindowOptions, actions, div, fill, point, prelude::*, px, relative, rgb,
-    size,
+    KeyDownEvent, LayoutId, Menu, MenuItem, ModifiersChangedEvent, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, PathPromptOptions, Pixels, Point, ScrollWheelEvent, ShapedLine,
+    SharedString, Style, TextRun, UTF16Selection, UnderlineStyle, Window, WindowBounds,
+    WindowOptions, actions, div, fill, point, prelude::*, px, relative, rgb, size,
 };
-use gpui_component::{Root, menu::AppMenuBar};
+use gpui_component::Root;
 use gpui_platform::application;
+
+mod menu_bar;
+use menu_bar::MenuBar;
 
 static START: OnceLock<Instant> = OnceLock::new();
 
@@ -67,6 +70,8 @@ struct Editor {
     file_name: Option<String>,
     first_frame_ms: Option<f64>,
     layout: Option<LayoutCache>,
+    /// Scrollbar thumb drag: (mouse y at start, scroll_y at start).
+    scroll_drag: Option<(Pixels, Pixels)>,
 }
 
 /// What the last paint produced, used for hit testing, IME placement, and scrolling.
@@ -97,6 +102,7 @@ impl Editor {
             file_name: None,
             first_frame_ms: None,
             layout: None,
+            scroll_drag: None,
         }
     }
 
@@ -223,9 +229,10 @@ impl Editor {
     }
 
     fn clamp_scroll(&mut self) {
-        let lh = self.line_height();
-        let max =
-            (lh * self.lines.len() as f32 - lh * (self.visible_rows() as f32 - 1.)).max(px(0.));
+        let max = match self.layout.as_ref() {
+            Some(l) => max_scroll(l.bounds.size.height, l.line_height, self.lines.len()),
+            None => px(0.),
+        };
         self.scroll_y = self.scroll_y.clamp(px(0.), max);
     }
 
@@ -384,11 +391,49 @@ impl Editor {
         let Some(l) = self.layout.as_ref() else {
             return;
         };
+        let bar = ScrollbarGeometry::new(l.bounds, l.line_height, self.lines.len(), self.scroll_y);
+        if bar.track.contains(&event.position) {
+            if bar.thumb.contains(&event.position) {
+                self.scroll_drag = Some((event.position.y, self.scroll_y));
+            } else {
+                // Clicking the track pages up or down, as on Windows.
+                let page = l.bounds.size.height - l.line_height;
+                if event.position.y < bar.thumb.top() {
+                    self.scroll_y -= page;
+                } else {
+                    self.scroll_y += page;
+                }
+                self.clamp_scroll();
+            }
+            cx.notify();
+            return;
+        }
         let rel_y = event.position.y - l.text_origin.y;
         let row = ((rel_y + self.scroll_y) / l.line_height).floor().max(0.) as usize;
         let row = row.min(self.lines.len() - 1);
         let col = self.col_for_x(row, event.position.x - l.text_origin.x);
         self.move_to((row, col), cx);
+    }
+
+    fn on_mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let (Some((start_y, start_scroll)), Some(l)) = (self.scroll_drag, self.layout.as_ref())
+        else {
+            return;
+        };
+        let bar = ScrollbarGeometry::new(l.bounds, l.line_height, self.lines.len(), self.scroll_y);
+        let travel = bar.track.size.height - bar.thumb.size.height;
+        if travel > px(0.) {
+            let max = max_scroll(l.bounds.size.height, l.line_height, self.lines.len());
+            self.scroll_y = start_scroll + max * ((event.position.y - start_y) / travel);
+            self.clamp_scroll();
+            cx.notify();
+        }
+    }
+
+    fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if self.scroll_drag.take().is_some() {
+            cx.notify();
+        }
     }
 
     fn on_scroll(&mut self, event: &ScrollWheelEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -423,6 +468,43 @@ impl Editor {
 
     fn range_from_utf16(&self, r: &Range<usize>) -> Range<usize> {
         self.byte_from_utf16(r.start)..self.byte_from_utf16(r.end)
+    }
+}
+
+fn scrollbar_width() -> Pixels {
+    px(14.)
+}
+
+/// The largest scroll offset: the last line may scroll up to the top of the view.
+fn max_scroll(view_height: Pixels, line_height: Pixels, lines: usize) -> Pixels {
+    let rows = (view_height / line_height).floor().max(1.);
+    (line_height * lines as f32 - line_height * (rows - 1.)).max(px(0.))
+}
+
+/// Vertical scrollbar placement, shared by painting and hit testing.
+struct ScrollbarGeometry {
+    track: Bounds<Pixels>,
+    thumb: Bounds<Pixels>,
+}
+
+impl ScrollbarGeometry {
+    fn new(bounds: Bounds<Pixels>, line_height: Pixels, lines: usize, scroll_y: Pixels) -> Self {
+        let track = Bounds::new(
+            point(bounds.right() - scrollbar_width(), bounds.top()),
+            size(scrollbar_width(), bounds.size.height),
+        );
+        let view = bounds.size.height;
+        let max = max_scroll(view, line_height, lines);
+        let thumb_h = (track.size.height * (view / (max + view)))
+            .max(px(24.))
+            .min(track.size.height);
+        let ratio = if max > px(0.) { scroll_y / max } else { 0. };
+        let thumb_top = track.top() + (track.size.height - thumb_h) * ratio;
+        let thumb = Bounds::new(
+            point(track.left() + px(3.), thumb_top),
+            size(scrollbar_width() - px(6.), thumb_h),
+        );
+        Self { track, thumb }
     }
 }
 
@@ -723,37 +805,63 @@ impl Element for EditorElement {
             rgb(0xf0f0f0),
         ));
 
-        let (cursor_row, cursor_col) = self.editor.read(cx).cursor;
-        window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
-            for (i, (num, line)) in p.gutter.iter().zip(&p.shaped).enumerate() {
-                let y = bounds.top() + p.y_offset + p.line_height * i as f32;
-                num.paint(
-                    point(bounds.left(), y),
-                    p.line_height,
-                    gpui::TextAlign::Left,
-                    None,
-                    window,
-                    cx,
-                )
-                .ok();
-                line.paint(
-                    point(p.text_origin.x, y),
-                    p.line_height,
-                    gpui::TextAlign::Left,
-                    None,
-                    window,
-                    cx,
-                )
-                .ok();
-                if p.first_line + i == cursor_row && focus_handle.is_focused(window) {
-                    let x = p.text_origin.x + line.x_for_index(cursor_col);
-                    window.paint_quad(fill(
-                        Bounds::new(point(x, y), size(px(2.), p.line_height)),
-                        rgb(0x0050c8),
-                    ));
+        let editor = self.editor.read(cx);
+        let (cursor_row, cursor_col) = editor.cursor;
+        let bar =
+            ScrollbarGeometry::new(bounds, p.line_height, editor.lines.len(), editor.scroll_y);
+        let dragging = editor.scroll_drag.is_some();
+        let text_bounds = Bounds::new(
+            bounds.origin,
+            size(bounds.size.width - scrollbar_width(), bounds.size.height),
+        );
+        window.with_content_mask(
+            Some(gpui::ContentMask {
+                bounds: text_bounds,
+            }),
+            |window| {
+                for (i, (num, line)) in p.gutter.iter().zip(&p.shaped).enumerate() {
+                    let y = bounds.top() + p.y_offset + p.line_height * i as f32;
+                    num.paint(
+                        point(bounds.left(), y),
+                        p.line_height,
+                        gpui::TextAlign::Left,
+                        None,
+                        window,
+                        cx,
+                    )
+                    .ok();
+                    line.paint(
+                        point(p.text_origin.x, y),
+                        p.line_height,
+                        gpui::TextAlign::Left,
+                        None,
+                        window,
+                        cx,
+                    )
+                    .ok();
+                    if p.first_line + i == cursor_row && focus_handle.is_focused(window) {
+                        let x = p.text_origin.x + line.x_for_index(cursor_col);
+                        window.paint_quad(fill(
+                            Bounds::new(point(x, y), size(px(2.), p.line_height)),
+                            rgb(0x0050c8),
+                        ));
+                    }
                 }
-            }
-        });
+            },
+        );
+
+        window.paint_quad(fill(bar.track, rgb(0xf3f3f3)));
+        window.paint_quad(
+            fill(
+                bar.thumb,
+                if dragging {
+                    rgb(0x8c8c8c)
+                } else {
+                    rgb(0xc2c2c2)
+                },
+            )
+            .corner_radii(px(4.)),
+        );
 
         let shaped = std::mem::take(&mut p.shaped);
         let text_origin = point(p.text_origin.x, p.text_origin.y);
@@ -838,6 +946,9 @@ impl Render for Editor {
                     .on_action(cx.listener(Self::paste))
                     .on_action(cx.listener(Self::copy_line))
                     .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
+                    .on_mouse_move(cx.listener(Self::on_mouse_move))
+                    .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
+                    .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
                     .on_scroll_wheel(cx.listener(Self::on_scroll))
                     .on_drop(cx.listener(Self::on_drop))
                     .children((!flag("POC_NO_TEXT")).then(|| EditorElement {
@@ -859,8 +970,10 @@ impl Render for Editor {
 /// Window content: menu bar on top, editor below. Window-level actions live here
 /// so that they work from the menu bar as well as from the editor.
 struct Workspace {
-    menu_bar: Entity<AppMenuBar>,
+    menu_bar: Entity<MenuBar>,
     editor: Entity<Editor>,
+    /// Alt went down with no other key or modifier; releasing it toggles the menu bar.
+    alt_pending: bool,
 }
 
 impl Render for Workspace {
@@ -878,6 +991,34 @@ impl Render for Workspace {
             .bg(rgb(0xffffff))
             .text_color(rgb(0x1e1e1e))
             .font_family(ui_font)
+            .on_modifiers_changed(
+                cx.listener(|this, event: &ModifiersChangedEvent, window, cx| {
+                    let m = event.modifiers;
+                    let alt_only = m.alt && !m.control && !m.shift && !m.platform && !m.function;
+                    if alt_only {
+                        this.alt_pending = true;
+                    } else if !m.modified() && this.alt_pending {
+                        this.alt_pending = false;
+                        this.menu_bar
+                            .update(cx, |bar, cx| bar.toggle_armed(window, cx));
+                    } else {
+                        this.alt_pending = false;
+                    }
+                }),
+            )
+            .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                this.alt_pending = false;
+                let m = event.keystroke.modifiers;
+                if m.alt && !m.control && !m.shift && !m.platform {
+                    let key = event.keystroke.key.clone();
+                    let opened = this
+                        .menu_bar
+                        .update(cx, |bar, cx| bar.open_by_mnemonic(&key, window, cx));
+                    if opened {
+                        cx.stop_propagation();
+                    }
+                }
+            }))
             .on_action({
                 let f = forward(|e, w, cx| e.open_file(&OpenFile, w, cx));
                 move |_: &OpenFile, w, cx| f(w, cx)
@@ -946,8 +1087,6 @@ fn set_menus(cx: &mut App) {
         Menu::new("ウィンドウ(W)").items([todo()]),
         Menu::new("ヘルプ(H)").items([todo()]),
     ]);
-    let menus = cx.get_menus().unwrap_or_default();
-    gpui_base::GlobalState::global_mut(cx).set_app_menus(menus);
 }
 
 fn bind_keys(cx: &mut App) {
@@ -981,6 +1120,7 @@ fn main() {
     START.get_or_init(Instant::now);
     application().run(|cx: &mut App| {
         gpui_component::init(cx);
+        menu_bar::init(cx);
         if let Ok(font) = std::env::var("POC_UI_FONT") {
             let theme = gpui_component::Theme::global_mut(cx);
             theme.font_family = font.clone().into();
@@ -1009,8 +1149,12 @@ fn main() {
         let build = |window: &mut Window, cx: &mut App| {
             let editor = cx.new(Editor::new);
             window.focus(&editor.focus_handle(cx), cx);
-            let menu_bar = AppMenuBar::new(cx);
-            cx.new(|_| Workspace { menu_bar, editor })
+            let menu_bar = MenuBar::new(cx.get_menus().unwrap_or_default(), cx);
+            cx.new(|_| Workspace {
+                menu_bar,
+                editor,
+                alt_pending: false,
+            })
         };
         if flag("POC_NO_ROOT") {
             cx.open_window(options, build)
