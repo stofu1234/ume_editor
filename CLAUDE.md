@@ -8,7 +8,20 @@
 
 - 計画と現在のフェーズ: [docs/roadmap.md](docs/roadmap.md)
 - 決定事項: [docs/adr/](docs/adr/README.md)。ADR と食い違う変更をするときは、先に ADR を更新するか、ユーザーに確認する
-- Cargo ワークスペースはまだない（Phase 0 で作る）。作ったら、ビルドとテストのコマンドをここに書く
+- 初期開発では Windows ARM64 で動かして確かめることを優先する（[ADR-0009](docs/adr/0009-initial-development-target.md)）
+
+## ビルドとテスト
+
+Rust のバージョンは `rust-toolchain.toml` で固定している。push の前に、次の 3 つを通す（CI と同じ内容）。
+
+```sh
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+```
+
+- CI（`.github/workflows/ci.yml`）は Windows x64・ARM64、macOS ARM64、Linux x64・ARM64 で回す
+- クレートは `crates/` に置く。`ume-core` は UI に依存しないコア
 
 ## 設計のルール
 
