@@ -1,0 +1,60 @@
+[package]
+name = "ume-poc-gpui"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99"
+description = "Throwaway UI prototype of ume_editor on GPUI (docs/poc/ui-framework.md)"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/stofu1234/ume_editor"
+publish = false
+
+# The prototype is its own workspace, outside the main one: it is throwaway code
+# (docs/poc/ui-framework.md), and ADR-0004 has not settled on GPUI yet.
+[workspace]
+
+[features]
+default = ["runtime-shaders"]
+# Compile the Metal shaders when the app starts instead of at build time, so
+# that the prototype builds without Xcode's Metal Toolchain. Build with
+# `--no-default-features` to measure startup with precompiled shaders.
+runtime-shaders = ["gpui_platform/runtime_shaders"]
+# Adds `--self-check <dir>`, which types into a window and saves what it shows as PNG files
+# (src/self_check.rs). GPUI renders a window to an image only with its test support.
+self-check = [
+    "gpui/test-support",
+    "gpui_platform/test-support",
+    "dep:anyhow",
+    "dep:image",
+    "dep:cocoa",
+    "dep:objc",
+    "dep:raw-window-handle",
+]
+
+[dependencies]
+anyhow = { version = "1", optional = true }
+# The official `gpui` crate on crates.io stops at 0.2.2 (2025-10). gpui-pre is
+# the weekly snapshot of Zed's GPUI that gpui-component builds on. Pinned
+# exactly, as ADR-0004 says.
+gpui = { package = "gpui-pre", version = "=0.3.8" }
+# font-kit: without it, GPUI on macOS draws no text at all.
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features = ["font-kit", "wayland", "x11"] }
+env_logger = { version = "0.11", default-features = false }
+futures = "0.3"
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+# Line breaks are LF, CR and CRLF only; Unicode line separators stay in the line.
+ropey = { version = "1.6", default-features = false, features = ["cr_lines", "simd"] }
+unicode-segmentation = "1.12"
+unicode-width = "0.2"
+url = "2.5"
+
+# For the self-check only, which presses keys as macOS key events. GPUI uses the same crates.
+[target.'cfg(target_os = "macos")'.dependencies]
+cocoa = { version = "0.26", optional = true }
+objc = { version = "0.2", optional = true }
+raw-window-handle = { version = "0.6", optional = true }
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
