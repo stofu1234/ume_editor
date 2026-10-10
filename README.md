@@ -1,5 +1,7 @@
 # ume_editor
 
+> **このリポジトリは https://github.com/stofu5678/ume_editor に移転しました。** ここは更新しません。
+
 サクラエディタの操作感を、macOS・Windows・Linux で使えるように作り直すテキストエディタです。
 
 > 開発を始めたばかりで、まだ動くものはありません。
