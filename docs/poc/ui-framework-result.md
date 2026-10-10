@@ -70,6 +70,16 @@ GPU ドライバー（Qualcomm Adreno X1-85、31.0.160.0）の振る舞いだっ
 - examples が使う `gpui_platform` は、crates.io では `gpui-pre-platform` という名前になっている
 - `gpui-pre-platform` は、既定では Wayland と X11 の機能が無効になっている。そのままでは Linux で画面を持たない動作（headless）になり、エラーも出ずにウィンドウが出ない。`features = ["wayland", "x11"]` を指定する
 
+### Linux（WSLg）での起動（2026-10-10）
+
+同じ PC の WSL2（Ubuntu 24.04 aarch64、WSLg 1.0.66）で、`poc/gpui-textview` をビルドして起動した。
+
+- ビルドに必要なパッケージ: `clang cmake libasound2-dev libfontconfig-dev libfreetype-dev libwayland-dev libx11-xcb-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libzstd-dev`。日本語を出すには `fonts-noto-cjk` も要る
+- Wayland で起動し、メニュー・行番号・日本語・スクロールバー・下の行が Windows と同じように出た
+- WSLg では GPU を使えず、ソフトウェア処理（Vulkan の llvmpipe）で描いている。Mesa の d3d12 ドライバーは、glxinfo が応答しなくなって使えなかった。描画の速さは、実機の Linux で測る
+- BIZ UDGothic は入っていないので、日本語は代わりのフォント（Noto Sans CJK）で出る。Noto Sans CJK は地域ごとに字形が違う（日本・中国・香港など）。本番では日本向けのフォントを明示して選ぶ
+- 日本語入力（fcitx5 などの IME）はまだ確かめていない
+
 ### ユーザーの確認（2026-10-09）
 
 1〜4 を試してもらった。日本語入力と文字の見え方は問題なし。気になった点として次の 2 つが挙がり、どちらも上のとおり対応した。
@@ -83,7 +93,7 @@ GPU ドライバー（Qualcomm Adreno X1-85、31.0.160.0）の振る舞いだっ
 - [x] 2. 文字の見え方（BIZ UDGothic / MS Gothic / Consolas / Yu Gothic UI を F7 で切り替え、12〜14pt）
 - [x] 4. 100 万行のスクロールの滑らかさ（ホイール、PageUp・PageDown の押し続け）
 - [x] 6. メニューとショートカット: メニューバーの操作感、Alt キーでメニューに入れるか、ファイルのドラッグ & ドロップ（Alt キーでの操作は指摘を受けて足した。直した版の操作感は、使いながら確かめる）
-- [ ] 7. Windows x64 の実機でビルドと起動、Mac と Linux でのビルドと起動。あわせて、`POC_MEMSTAT=6` を付けて起動し、メモリが 4 MB ずつ増える問題が起きるかを見る
+- [ ] 7. Windows x64 の実機でビルドと起動、Mac と Linux でのビルドと起動（Linux は WSLg で起動できた。上を参照）。あわせて、`POC_MEMSTAT=6` を付けて起動し、メモリが 4 MB ずつ増える問題が起きるかを見る
 
 ## Mac での試作（`poc/gpui`）
 
